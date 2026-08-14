@@ -13,13 +13,8 @@ function load() {
       const s = JSON.parse(raw);
       // 葱姜蒜已改为调料，自动清掉旧的库存记录
       const inventory = (Array.isArray(s.inventory) ? s.inventory : []).filter(i => !['garlic', 'ginger', 'scallion'].includes(i.key));
-      const customIngs = Array.isArray(s.customIngs) ? s.customIngs : [];
-      // 迁移：库存里已有的自定义食材，补进快捷图标列表
-      for (const it of inventory) {
-        if (typeof it.key === 'string' && it.key.startsWith('custom:') && !customIngs.find(c => c.key === it.key)) {
-          customIngs.push({ key: it.key, customName: it.customName || it.key.slice(7), nameId: it.nameId || null });
-        }
-      }
+      // 快捷图标以本 App 自己登记的为准；混入的大人食材（天贝/带鱼等）在此清掉
+      const customIngs = cleanCustomIngs(s.customIngs);
       // 迁移：能对上预设/别名的自定义食材，升级成预设 key
       const mig = migrateCustoms(inventory, customIngs);
       return {
@@ -74,6 +69,17 @@ function fmtDate(ts) {
 
 function presetOf(key) {
   return INGREDIENT_PRESETS.find(p => p.key === key);
+}
+
+/* 快捷图标列表清洗：只保留本 App 自己创建的（带 mine 标记），
+   或旧数据里宝宝词典认识的（红枣等）。共享库存时会从大人 App 混入
+   天贝/带鱼之类的条目，没有标记且词典不认识的一律清掉 */
+function cleanCustomIngs(list) {
+  return (Array.isArray(list) ? list : []).filter(c => {
+    if (c && c.mine === true) return true;
+    const name = (c && c.customName) || (c && typeof c.key === 'string' ? c.key.slice(7) : '');
+    return !!(presetKeyForZh(name) || ZH_TO_ID[name]);
+  });
 }
 
 /* 和 Smart Helper 共用同步密码时，库存是共享的，但大人 App 的专属食材
@@ -134,7 +140,7 @@ function addStock(key, customName, nameId) {
   if (key.startsWith('custom:')) {
     const c = state.customIngs.find(x => x.key === key);
     if (!c) {
-      state.customIngs.push({ key, customName: customName || key.slice(7), nameId: nameId || null });
+      state.customIngs.push({ key, customName: customName || key.slice(7), nameId: nameId || null, mine: true });
     } else if (nameId && !c.nameId) {
       c.nameId = nameId;
     }
@@ -1363,9 +1369,10 @@ async function syncPull() {
         customRecipes: Array.isArray(remote.customRecipesMummy) ? remote.customRecipesMummy
           : (isMummyPayload && Array.isArray(remote.customRecipes) ? remote.customRecipes
           : (state.customRecipes || [])),
-        customIngs: Array.isArray(remote.customIngsMummy) ? remote.customIngsMummy
+        customIngs: cleanCustomIngs(
+          Array.isArray(remote.customIngsMummy) ? remote.customIngsMummy
           : (isMummyPayload && Array.isArray(remote.customIngs) ? remote.customIngs
-          : (state.customIngs || [])),
+          : (state.customIngs || []))),
         updatedAt: remote.updatedAt,
       });
       state.sync = { family };
