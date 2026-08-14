@@ -76,6 +76,16 @@ function presetOf(key) {
   return INGREDIENT_PRESETS.find(p => p.key === key);
 }
 
+/* 和 Smart Helper 共用同步密码时，库存是共享的，但大人 App 的专属食材
+  （白鲳、带鱼、辣椒等）不应出现在宝宝界面。规则：只显示本 App 预设里的食材，
+   或本 App 自己创建的自定义图标食材。其余食材保留在数据里（推送时不丢），只是不显示。 */
+function isVisibleIng(key) {
+  return !!presetOf(key) || (state.customIngs || []).some(c => c.key === key);
+}
+function visibleInventory() {
+  return state.inventory.filter(i => isVisibleIng(i.key));
+}
+
 /* 内置菜谱 + 用户自定义菜谱 */
 function allRecipes() {
   return RECIPES.concat(state.customRecipes || []);
@@ -279,7 +289,7 @@ function renderInventory(askTranslateFor) {
     </div>`;
   }).join('');
 
-  const rows = state.inventory.map(item => {
+  const rows = visibleInventory().map(item => {
     const p = presetOf(item.key);
     const emoji = p ? p.emoji : customEmoji(item.customName || item.key);
     const zh = p ? p.nameZh : (item.customName || item.key);
@@ -315,7 +325,7 @@ function renderInventory(askTranslateFor) {
   view.innerHTML = `
     <div class="section-title">点击加入库存（点一下 +1）</div>
     <div class="preset-grid">${grid}</div>
-    <div class="section-title">当前库存（共 ${state.inventory.length} 种）</div>
+    <div class="section-title">当前库存（共 ${visibleInventory().length} 种）</div>
     <div class="card">
       ${rows || '<div class="empty-tip">库存是空的，先点上面的食材录入本周采购吧</div>'}
       ${customArea}
@@ -328,6 +338,7 @@ function renderInventory(askTranslateFor) {
         <button class="btn secondary" id="syncSaveBtn">保存并同步</button>
       </div>
       <div class="always-have" id="syncStatus">${syncEnabled() ? '已设置，打开 App 自动同步' : '未设置：每台手机数据各自独立'}</div>
+      <div class="always-have">💡 可以和 Smart Helper 用同一个密码：只共享食材库存，大人专属的食材不会出现在宝宝界面</div>
     </div>
   `;
 
@@ -1338,13 +1349,23 @@ async function syncPull() {
         return;
       }
       const family = state.sync.family;
+      /* 与 Smart Helper 共用密码时：只有 inventory/history/months 直接共享；
+         菜单、自定义菜谱、自定义图标用 Mummy 专属字段，互不覆盖。
+         旧格式（未分家时的宝宝数据）通过 isMummyPayload 兼容读取 */
+      const isMummyPayload = typeof remote.months === 'number'
+        || Array.isArray(remote.customRecipesMummy) || remote.planMummy;
+      /* 远端没有宝宝字段时（大人 App 刚推过）保留本地值，避免互相清空 */
       Object.assign(state, {
         inventory: Array.isArray(remote.inventory) ? remote.inventory : [],
         history: Array.isArray(remote.history) ? remote.history : [],
         months: [12, 18, 24].includes(remote.months) ? remote.months : 12,
-        plan: remote.plan || null,
-        customRecipes: Array.isArray(remote.customRecipes) ? remote.customRecipes : [],
-        customIngs: Array.isArray(remote.customIngs) ? remote.customIngs : [],
+        plan: remote.planMummy || (isMummyPayload ? remote.plan : null) || state.plan || null,
+        customRecipes: Array.isArray(remote.customRecipesMummy) ? remote.customRecipesMummy
+          : (isMummyPayload && Array.isArray(remote.customRecipes) ? remote.customRecipes
+          : (state.customRecipes || [])),
+        customIngs: Array.isArray(remote.customIngsMummy) ? remote.customIngsMummy
+          : (isMummyPayload && Array.isArray(remote.customIngs) ? remote.customIngs
+          : (state.customIngs || [])),
         updatedAt: remote.updatedAt,
       });
       state.sync = { family };
@@ -1374,9 +1395,9 @@ function syncPush() {
           inventory: state.inventory,
           history: state.history,
           months: state.months,
-          plan: state.plan,
-          customRecipes: state.customRecipes,
-          customIngs: state.customIngs,
+          planMummy: state.plan,
+          customRecipesMummy: state.customRecipes,
+          customIngsMummy: state.customIngs,
           updatedAt: state.updatedAt,
         }),
       });
