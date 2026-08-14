@@ -83,10 +83,18 @@ function cleanCustomIngs(list) {
 }
 
 /* 和 Smart Helper 共用同步密码时，库存是共享的，但大人 App 的专属食材
-  （白鲳、带鱼、辣椒等）不应出现在宝宝界面。规则：只显示本 App 预设里的食材，
-   或本 App 自己创建的自定义图标食材。其余食材保留在数据里（推送时不丢），只是不显示。 */
+  （白鲳、带鱼、辣椒、天贝等）不应出现在宝宝界面。规则：显示本 App 预设食材、
+   本 App 自己登记的自定义图标食材；从大人端同步来的自定义食材，名字在宝宝
+   词典里的（红枣/奶酪等）也显示，方便从大人端直接补宝宝食材。 */
 function isVisibleIng(key) {
-  return !!presetOf(key) || (state.customIngs || []).some(c => c.key === key);
+  if (presetOf(key)) return true;
+  if ((state.customIngs || []).some(c => c.key === key)) return true;
+  if (typeof key === 'string' && key.startsWith('custom:')) {
+    const item = state.inventory.find(i => i.key === key);
+    const name = (item && item.customName) || key.slice(7);
+    return !!(presetKeyForZh(name) || ZH_TO_ID[name]);
+  }
+  return false;
 }
 function visibleInventory() {
   return state.inventory.filter(i => isVisibleIng(i.key));
